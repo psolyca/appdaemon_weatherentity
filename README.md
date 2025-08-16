@@ -1,3 +1,10 @@
+# IMPORTANT NOTE
+This widget works only with a modified version of AppDaemon.
+A PR has been submitted https://github.com/AppDaemon/appdaemon/pull/2413.
+
+If you do not want to wait, get this specific branch : https://github.com/psolyca/appdaemon_weatherentity/tree/workaround
+
+
 # Description
 Base weather widget for appdaemon homeassistant dashboards.
 
