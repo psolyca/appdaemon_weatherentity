@@ -1,13 +1,3 @@
-# IMPORTANT NOTE
-This widget works only with a modified version of AppDaemon.
-A PR has been submitted https://github.com/AppDaemon/appdaemon/pull/2413.
-
-If you do not want to wait, follow these steps:
-Get my modified AppDaemon addon repo https://github.com/psolyca/addon-appdaemon/ and copy the folder `appdaemon` in your `addons` folder on `Home Assistant`
-Get my modified AppDaemon repo https://github.com/psolyca/appdaemon/tree/callback_service_call and copy the content in the previous `appdaemon` folder
-Follow step 2 of this tutorial : https://developers.home-assistant.io/docs/add-ons/tutorial/ and you should see an `AppDaemon` add-on and install it.
-Get this repo https://github.com/psolyca/appdaemon_weatherentity and copy the content in the `addon_configs\local_appdaemon\custon_widgets` folder of `Home Assistant`.
-
 # Description
 Base weather widget for appdaemon homeassistant dashboards.
 
