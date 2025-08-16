@@ -117,6 +117,22 @@ function base_weatherentity(widget_id, url, skin, parameters)
 
     // Finally, call the parent constructor to get things moving
     WidgetBase.call(self, widget_id, url, skin, parameters, monitored_entities, callbacks);
+	
+	this.call_service = function(child, args, callback)
+    {
+        if ("resident_namespace" in child.parameters)
+        {
+            ns = child.parameters.resident_namespace
+        }
+        else
+        {
+            ns = child.parameters.namespace;
+        }
+
+        service = args["service"];
+
+        window.dashstream.stream.call_service(service, ns, args, callback)
+    };
 
     // Function Definitions
 
