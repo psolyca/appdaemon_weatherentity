@@ -1,5 +1,5 @@
 // Base weather widget allowing to get whether from a weather entitied in addition to sensors.
-// Also adds serveral days/hours of forecast.
+// Also adds up to 4 days/hours of forecast.
 // Fully compliant with the official base widget.
 // Note: For 2x2 widget, only 1 forecqst should be used. Up to for can be used in 3x2.
 //
@@ -21,7 +21,12 @@
 //
 // Based on the appdaemon weather widget:
 // https://github.com/AppDaemon/appdaemon/blob/dev/appdaemon/widgets/baseweather/baseweather.js
-//
+// Updated to be compliant with weather entity https://www.home-assistant.io/integrations/weather/
+// I did not check sensors compatibilities for fields :
+// precip_probability, precip_intensity, precip_type
+// as these fields are not provided by the weather entity
+// BtW some fields are also not implemented
+// cloud_coverage, dew_point, uv_index, visibility, wind_gust_speed
 
 function OnStateAvailable(self, state)
 {
@@ -48,9 +53,13 @@ function base_weatherentity(widget_id, url, skin, parameters)
     self.OnStateUpdate = OnStateUpdate;
 
     var monitored_entities = []
+    var weather_instance
 
+    self.show_only_forecast = parameters.show_only_forecast;
     self.show_forecast = parameters.show_forecast;
-    self.daily_mode = parameters.forecast_daily;
+    self.forecast_type = parameters.forecast_type;
+    self.forecast_skip_first_day = parameters.forecast_skip_first_day===1?true:false;
+    self.show_forecast += parameters.forecast_skip_first_day===1?1:0;
     // If entity is specified, we are monitoring a weather entity
     if ("entity" in parameters)
     {
@@ -58,6 +67,11 @@ function base_weatherentity(widget_id, url, skin, parameters)
         var monitored_entities = [
             {"entity": parameters.entity, "initial": self.OnStateAvailable, "update": self.OnStateUpdate}
         ]
+        // To get forecast, we need to call a service
+        if (parameters.show_forecast > 0)
+        {
+            self.service_parameters = {'service': 'weather/get_forecasts', 'entity_id': parameters.entity, 'type': parameters.forecast_type}
+        }
     }
     else if ("entities" in parameters)
     {
@@ -117,27 +131,6 @@ function base_weatherentity(widget_id, url, skin, parameters)
 
     function OnStateAvailable(self, state)
     {
-        // Init the units if sensors are used. not sent when using entity.
-        if (self.sensor_monitoring)
-        {
-            field = self.entities_map[state.entity_id]
-            if (field == 'temperature')
-            {
-                self.set_field(self, "unit", state.attributes.unit_of_measurement)
-            }
-            else if (field == 'wind_speed')
-            {
-                self.set_field(self, "wind_unit", state.attributes.unit_of_measurement)
-            }
-            else if (field == 'pressure')
-            {
-                self.set_field(self, "pressure_unit", state.attributes.unit_of_measurement)
-            }
-            else if (field == 'precip_intensity')
-            {
-                self.set_field(self, "rain_unit", state.attributes.unit_of_measurement)
-            }
-        }
         set_view(self, state)
     }
 
@@ -162,26 +155,15 @@ function base_weatherentity(widget_id, url, skin, parameters)
         return "mdi mdi-weather-" + (icon_map[condition] || condition);
     }
 
-    function get_precipitations(self, forecast)
-    {
-        if (self.parameters.forecast_precip_unit == "%" && forecast.precipitation_probability)
-        {
-            precip = forecast.precipitation_probability.toFixed(0);
-        }
-        else if (forecast.precipitation)
-        {
-            precip = forecast.precipitation.toFixed(1);
-        }
-        else
-        {
-            precip = 0;
-        }
-        return precip;
-    }
-
     function pad(num)
     {
         return num<10 ? '0' + num : num.toString()
+    }
+
+    // Avoid "NaN" string in view
+    function format_number(value)
+    {
+        return typeof value !== "undefined"?self.format_number(self, value):'';
     }
 
     function get_date_str(self, datetime)
@@ -219,7 +201,53 @@ function base_weatherentity(widget_id, url, skin, parameters)
             {
                 self.set_field(self, "bearing_icon", "mdi-rotate-" + compute_icon_rotation(state.state))
             }
-            self.set_field(self, field, self.format_number(self, state.state))
+            self.set_field(self, field, format_number(state.state))
+        }
+    }
+
+    function set_view_from_forecast(data)
+    {
+        self = weather_instance;
+        entity_id = data.request.data.data.entity_id
+        forecast_data = data.data.result.response[entity_id].forecast
+        fc_available = Object.keys(forecast_data).length
+        fc_min = self.forecast_skip_first_day?1:0
+        fc_max = (self.show_forecast > fc_available)?fc_available:self.show_forecast;
+        for (idx = fc_min; idx < fc_max; idx++)
+        {
+            attr_suffix= self.forecast_skip_first_day?idx:idx+1;
+            forecast = forecast_data[idx];
+            evt_datetime = new Date(forecast.datetime);
+            self.set_field(self, "forecast_icon"+attr_suffix, get_weather_icon(forecast.condition));
+            if (self.parameters.forecast_precipitation_preference == "%" && forecast.precipitation_probability)
+            {
+                self.set_field(self, "forecast_precip_probability"+attr_suffix, format_number(forecast.precipitation_probability.toFixed(0)));
+            }
+            else if (forecast.precipitation)
+            {
+                self.set_field(self, "forecast_precip"+attr_suffix, format_number(forecast.precipitation.toFixed(1)));
+            }
+            else if (forecast.precipitation_probability)
+            {
+                self.set_field(self, "forecast_precip_probability"+attr_suffix, format_number(forecast.precipitation_probability.toFixed(0)));
+            }
+            self.set_field(self, "forecast_wind_speed"+attr_suffix, format_number(forecast.wind_speed));
+            self.set_field(self, "forecast_bearing_icon"+attr_suffix, "mdi-rotate-" + compute_icon_rotation(forecast.wind_bearing));
+            self.set_field(self, "forecast_wind_bearing"+attr_suffix, format_number(forecast.wind_bearing));
+
+            if (self.forecast_type === "daily")
+            {
+                fc_title = get_date_str(self, evt_datetime);
+                self.set_field(self, "forecast_title"+attr_suffix, fc_title);
+                self.set_field(self, "forecast_temperature_min"+attr_suffix, format_number(forecast.templow));
+                self.set_field(self, "forecast_temperature_max"+attr_suffix, format_number(forecast.temperature));
+            }
+            else
+            {
+                fc_title = evt_datetime.getHours() + "h";
+                self.set_field(self, "forecast_title"+attr_suffix, fc_title);
+                self.set_field(self, "forecast_temperature_min"+attr_suffix, format_number(forecast.temperature));
+            }
         }
     }
 
@@ -231,48 +259,18 @@ function base_weatherentity(widget_id, url, skin, parameters)
         self.set_field(self, "icon", get_weather_icon(state.state));
 
         // Set measures
-        self.set_field(self, "temperature", self.format_number(self, state.attributes.temperature));
-        self.set_field(self, "pressure", self.format_number(self, state.attributes.pressure));
-        self.set_field(self, "humidity", self.format_number(self, state.attributes.humidity));
-        self.set_field(self, "wind_speed", self.format_number(self, state.attributes.wind_speed));
-        self.set_field(self, "wind_bearing", self.format_number(self, state.attributes.wind_bearing));
+        self.set_field(self, "temperature", format_number(state.attributes.temperature));
+        self.set_field(self, "apparent_temperature", format_number(state.attributes.apparent_temperature));
+        self.set_field(self, "pressure", format_number(state.attributes.pressure));
+        self.set_field(self, "humidity", format_number(state.attributes.humidity));
+        self.set_field(self, "wind_speed", format_number(state.attributes.wind_speed));
+        self.set_field(self, "wind_bearing", format_number(state.attributes.wind_bearing));
 
-        // As per https://github.com/home-assistant/core/blob/dev/homeassistant/components/weather/__init__.py
-        // those fields are not provided by the weather entities:
-        // precip_probability, precip_intensity, precip_type,
-
-        // forecast_temperature_min: forecast.templow If daily mode only
-        if (self.show_forecast)
+        if (self.show_forecast > 0)
         {
-            // Display required forecast count
-            fc_available = Object.keys(state.attributes.forecast).length
-            fc_max = (self.show_forecast > fc_available)?fc_available:self.show_forecast;
-            for (idx = 0; idx < fc_max; idx++)
-            {
-                attr_suffix = (idx > 0)?idx+1:"";
-                forecast = state.attributes.forecast[idx];
-                evt_datetime = new Date(forecast.datetime);
-                self.set_field(self, "forecast_icon"+attr_suffix, get_weather_icon(forecast.condition));
-                precip = get_precipitations(self, forecast);
-                self.set_field(self, "forecast_precip_probability"+attr_suffix, precip);
-                self.set_field(self, "forecast_wind_speed"+attr_suffix, self.format_number(self, forecast.wind_speed));
-                self.set_field(self, "forecast_bearing_icon"+attr_suffix, "mdi-rotate-" + compute_icon_rotation(forecast.wind_bearing));
-                self.set_field(self, "forecast_wind_bearing"+attr_suffix, self.format_number(self, forecast.wind_bearing));
-
-                if (self.daily_mode)
-                {
-                    fc_title = get_date_str(self, evt_datetime);
-                    self.set_field(self, "forecast_title"+attr_suffix, fc_title);
-                    self.set_field(self, "forecast_temperature_min"+attr_suffix, self.format_number(self, forecast.templow));
-                    self.set_field(self, "forecast_temperature_max"+attr_suffix, self.format_number(self, forecast.temperature));
-                }
-                else
-                {
-                    fc_title = evt_datetime.getHours() + "h";
-                    self.set_field(self, "forecast_title"+attr_suffix, fc_title);
-                    self.set_field(self, "forecast_temperature_min"+attr_suffix, self.format_number(self, forecast.temperature));
-                }
-            }
+            // Keep weatherentity instance for callback return
+            weather_instance = self;
+            self.call_service(self, self.service_parameters, set_view_from_forecast);
         }
     }
 
